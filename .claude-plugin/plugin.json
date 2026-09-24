@@ -1,0 +1,8 @@
+{
+  "name": "desktop-pet",
+  "description": "A pixel pet (Clawd, or the cat Amir Latex) that lives on your app's buttons and fields -- added to any Qt, Tk, GTK, web or Electron app, or ported to any other toolkit.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Yonatan Louzon"
+  }
+}

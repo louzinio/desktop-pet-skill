@@ -1,0 +1,54 @@
+--- idlelib/pyshell.py
++++ idlelib/pyshell.py
+@@ -490,6 +490,8 @@
+     def restart_subprocess(self, with_cwd=False, filename=''):
+         if self.restarting:
+             return self.rpcclt
++        if getattr(self.tkconsole, "pet", None):
++            self.tkconsole.pet.pet.startle()
+         self.restarting = True
+         # close only the subprocess debugger
+         debug = self.getdebugger()
+@@ -720,6 +722,8 @@
+ 
+         """
+         tkconsole = self.tkconsole
++        if getattr(tkconsole, "pet", None):
++            tkconsole.pet.pet.feel("angry", 5.0)
+         text = tkconsole.text
+         text.tag_remove("ERROR", "1.0", "end")
+         type, value, tb = sys.exc_info()
+@@ -1092,9 +1096,13 @@
+         "Helper for ModifiedInterpreter"
+         self.resetoutput()
+         self.executing = True
++        if getattr(self, "pet", None):
++            self.pet.pet.thinking = True
+ 
+     def endexecuting(self):
+         "Helper for ModifiedInterpreter"
++        if getattr(self, "pet", None):
++            self.pet.pet.thinking = False
+         self.executing = False
+         self.canceled = False
+         self.showprompt()
+@@ -1160,6 +1168,19 @@
+                    (sys.version, sys.platform, self.COPYRIGHT, nosub))
+         self.text.focus_force()
+         self.showprompt()
++        self.pet = None
++        if os.environ.get("IDLE_PET", "1") != "0":
++            try:
++                from idlelib.desktop_pet.tk import DEFAULT_PERCHES, TkPet
++
++                def perch(widget):
++                    # The shell's text fills the window; standing on its top edge would
++                    # put the pet under the menu. Everything else is fair game.
++                    return widget.winfo_class() in DEFAULT_PERCHES - {"Text"}
++                self.pet = TkPet(self.top, perches=perch)
++                self.pet.start()
++            except Exception as error:  # the shell must open even if the pet cannot
++                print(f"IDLE pet disabled: {error!r}", file=sys.__stderr__)
+         # User code should use separate default Tk root window
+         import tkinter
+         tkinter._support_default_root = True

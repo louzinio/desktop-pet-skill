@@ -1,0 +1,13 @@
+{
+  "name": "desktop-pet-skill",
+  "owner": {
+    "name": "Yonatan Louzon"
+  },
+  "plugins": [
+    {
+      "name": "desktop-pet",
+      "source": "./",
+      "description": "A pixel pet that lives on your app's buttons and fields -- Qt, Tk, GTK, web, Electron, or ported anywhere."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Desktop pet -- web example</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; margin: 0; height: 100vh; background: #f4f5f7; }
+    #save { position: absolute; left: 200px; top: 300px; width: 200px; height: 40px; }
+    #elsewhere { position: absolute; left: 20px; top: 440px; width: 120px; height: 30px; }
+    .card { position: absolute; left: 480px; top: 180px; width: 240px; height: 120px; background: #fff;
+            border: 1px solid #d5d9e0; border-radius: 6px; padding: 12px; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <button id="save">Save</button>
+  <button id="elsewhere">Elsewhere</button>
+  <div class="card" data-pet-perch>Any element with data-pet-perch is somewhere to stand.</div>
+  <script type="module">
+    import { attachPet } from "../../skills/desktop-pet/assets/js/pet-dom.js";
+    import { Mulberry32 } from "../../skills/desktop-pet/assets/js/pet-core.js";
+    const seed = new URLSearchParams(location.search).get("seed");
+    window.pet = attachPet({ rng: seed ? new Mulberry32(Number(seed)) : undefined });
+    window.clicks = [];
+    for (const id of ["save", "elsewhere"]) {
+      document.getElementById(id).addEventListener("click", () => window.clicks.push(id));
+    }
+  </script>
+</body>
+</html>
