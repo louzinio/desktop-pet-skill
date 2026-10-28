@@ -103,13 +103,31 @@ def test_a_press_on_the_pet_picks_it_up_instead_of_clicking_below(app):
     window.close()
 
 
+def test_clicked_five_times_fast_it_says_its_line(app):
+    window, _button, _ = _window(app)
+    pet = qt.WindowPet(window, skin="cat")
+    pet.pet.rng = Mulberry32(4)
+    pet.start()
+    assert _landed(app, pet)
+    for _ in range(5):
+        left, top, width, height = pet.body_rect()
+        _click(window, int(left + width / 2), int(top + height / 2))
+        _pump(app, 0.03)
+    assert pet.pet.speech == pet.pet.skin.fed_up
+    for _ in range(5):
+        _pump(app, 0.1)
+        window.grab()  # the bubble draws
+    pet.stop()
+    window.close()
+
+
 def test_the_pet_draws_without_error_in_every_state(app):
     window, _, _ = _window(app)
     pet = qt.WindowPet(window, acts="gnss", skin="cat")
     pet.pet.rng = Mulberry32(9)
     pet.start()
     assert _landed(app, pet)
-    for act in ("gps", "jam", "spoof", "pps", "cesium", "holdover"):
+    for act in ("gps", "jam", "spoof", "pps", "cesium", "holdover", "oops", "saw", "fly", "groom"):
         pet.pet.mood, pet.pet.act = Mood.IDLE, None
         assert pet.pet.perform(act)
         for _ in range(8):

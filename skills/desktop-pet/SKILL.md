@@ -161,6 +161,10 @@ the first two; `references/core-api.md` ends with how.
 - **Skins** live in `core.py` / `pet-core.js`: rows of letters, a palette, a face function.
   Add one by copying `CAT` and redrawing the rows; `stalks=True` makes it creep before
   pouncing, `outline=True` gives it a light edge on dark themes.
+- **Everyday acts** are always on: grooming, stretching, chasing its tail, a fly, a sneeze,
+  sitting, sawing a plank -- and, for the cat, "oops" (a pink thong, seen from behind). Five
+  quick clicks on it and it is fed up and says so in a bubble (`Skin.fed_up`); in Qt a
+  right-click on it opens the skin menu.
 - **Acts** are optional skits it performs now and then. None are on by default; the GNSS
   pack from OFIR (satellite fix, jamming, spoofing, 1PPS, cesium, holdover) is
   `acts="gnss"`. For a themed app you can add one: a duration in the act table, its
@@ -170,5 +174,5 @@ the first two; `references/core-api.md` ends with how.
 
 If the app is C++, Rust, Java, Dart, C#... port `core.py` rather than re-inventing the
 behaviour, and prove the port against `assets/reference_trace.json` -- a scripted world
-with the expected state after each of 4,400 steps, for two skins. `references/porting.md`
+with the expected state after each of 4,800 steps, for two skins. `references/porting.md`
 walks through it; `scripts/check_js_core.mjs` is a complete replay check to translate.
