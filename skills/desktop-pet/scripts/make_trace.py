@@ -33,7 +33,7 @@ from desktop_pet.core import (  # noqa: E402
 )
 
 TRACE = HERE.parent / "assets" / "reference_trace.json"
-STEPS = 4400
+STEPS = 4800
 BOUNDS = (0.0, 0.0, 1200.0, 800.0)
 LEDGE_SETS = [
     [[0.0, 1200.0, 800.0, None], [100.0, 400.0, 600.0, "panel"], [500.0, 900.0, 480.0, "button"],
@@ -79,6 +79,13 @@ def _inputs(step: int) -> dict:
         events = [["startle"]]
     elif step == 1850:
         events = [["perform", "wave"]]
+    elif 1400 <= step < 1450:
+        events = [["perform", "oops"]]  # the cat turns round; Clawd has no back to show
+    elif 4300 <= step < 4400:
+        # Woken (the cursor has been still since step 1700, so it sleeps), then the saw.
+        events = [["startle"], ["perform", "saw"]] if step == 4300 else [["perform", "saw"]]
+    elif 4700 <= step < 4705:
+        events = [["poke"]]  # five clicks in five frames: fed up
     elif step >= 2000 and step % 400 < 150 and step // 400 * 400 in _ACT_STEPS:
         events = [["perform", _ACT_STEPS[step // 400 * 400]]]
     return {"dt": dt, "cursor": [round(v, 6) for v in cursor], "ledges": 1 if 1000 <= step < 1400 else 0,
@@ -103,6 +110,7 @@ def _state(pet: Pet, step: int) -> dict:
         "ledge": None if pet.ledge is None else [pet.ledge.left, pet.ledge.y],
         "particles": [[p.kind, p.x, p.y] for p in pet.particles],
         "view": [len(view.props), [label[0] for label in view.labels], view.ghost, view.bars, view.dots],
+        "speech": pet.speech, "dizzy": pet.dizzy, "petting": pet.petting,
     }
     if step % 10 == 0:
         state["frame"] = frame(pet)

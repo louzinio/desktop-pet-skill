@@ -21,6 +21,20 @@ export const GNSS_ACTS = Object.freeze({ gps: 3.0, jam: 3.0, spoof: 3.0, pps: 5.
 export const ACT_PACKS = Object.freeze({ gnss: GNSS_ACTS });
 export const ACT_CHANCE = 0.12;
 export const REACTIONS = Object.freeze({ yawn: 1.4, wave: 1.0, look: 2.4 });
+// What the pet does on its own, between everything else; "oops" only for a skin drawn from behind.
+export const EVERYDAY_ACTS = Object.freeze({
+  groom: 2.6, stretch: 1.8, chase: 2.4, fly: 3.6, sneeze: 1.3, sit: 4.0, oops: 4.4, saw: 5.4,
+});
+export const OOPS_BACK = Object.freeze([0.3, 1.9]);
+export const SAW_FROM = 0.8;
+export const SAW_UNTIL = 4.4;
+export const POKES_TO_FUME = 5;
+export const POKE_WINDOW_S = 2.0;
+export const SPEECH_S = 3.5;
+export const EVERYDAY_CHANCE = 0.2;
+export const DIZZY_SPEED = 1500.0;
+export const DIZZY_S = 1.8;
+export const PURR_AFTER = 0.5;
 export const LOOK_CHANCE = 0.1;
 export const STALK_SPEED = 22.0;
 
@@ -75,8 +89,38 @@ export class Pet {
       plannedY: null, rideOffset: [4.0, 0.0], quiet: 0.0, emotion: null, feelingLeft: 0.0, beat: 0.0,
       particles: [], skin, nextBlink: 3.0, cursor: [0.0, 0.0], cursorStill: 0.0, cursorSpeed: 0.0,
       cursorVelocity: [0.0, 0.0], act: null, actTime: 0.0, actBeat: 0.0, lastAct: null, thinking: false,
-      acts: { ...acts }, gaze: null, gazeLeft: 0.0, away: 0.0, target: null,
+      acts: { ...acts }, gaze: null, gazeLeft: 0.0, away: 0.0, target: null, ear: 0.0, nextEar: 5.0,
+      dizzy: 0.0, vyAtLanding: 0.0, petting: 0.0, purrBeat: 0.0, speech: null, speechLeft: 0.0, pokes: [],
     });
+  }
+
+  get purring() {
+    return this.petting >= PURR_AFTER && [Mood.IDLE, Mood.SLEEP, Mood.LAND, Mood.ACT].includes(this.mood);
+  }
+
+  get breathing() {
+    if (this.mood === Mood.SLEEP) return 0.06 * Math.sin(this.clock * 1.3);
+    if (this.mood === Mood.IDLE || (this.mood === Mood.ACT && this.act === "sit")) {
+      return (this.purring ? 0.05 : 0.025) * Math.sin(this.clock * (this.purring ? 3.2 : 2.2));
+    }
+    return 0.0;
+  }
+
+  get tailUp() {
+    if (this.mood === Mood.SLEEP) return false;
+    if (this.purring || this.mood === Mood.AIR) return true;
+    const rate = this.expression === "angry" ? 6.0 : (this.expression === "sad" ? 0.0 : 1.6);
+    return rate > 0.0 && Math.trunc(this.clock * rate) % 2 === 0;
+  }
+
+  get flyAt() {
+    if (this.act !== "fly" || this.actTime >= 3.0) return null;
+    const t = this.actTime;
+    return [30.0 * Math.cos(t * 2.6), -this.skin.height - 26.0 + 10.0 * Math.sin(t * 5.3)];
+  }
+
+  get facingAway() {
+    return this.act === "oops" && OOPS_BACK[0] <= this.actTime && this.actTime < OOPS_BACK[1];
   }
 
   get expression() {
@@ -84,22 +128,36 @@ export class Pet {
     const t = this.actTime;
     if ((this.act === "jam" && 0.8 <= t && t < 2.2) || (this.act === "spoof" && t >= 1.8)) return "angry";
     if (this.act === "holdover" && t >= 1.0) return "sad";
+    if (this.act === "oops" && t >= OOPS_BACK[1]) return "embarrassed";
     return null;
   }
 
   get eyesClosed() {
-    return this.mood === Mood.SLEEP || this.blink > 0.0 || (this.act === "yawn" && this.actTime < 0.9);
+    if (this.mood === Mood.SLEEP || this.blink > 0.0 || this.purring) return true;
+    if (this.act === "yawn" && this.actTime < 0.9) return true;
+    if (this.act === "stretch" && this.actTime < 1.3) return true;
+    if (this.act === "sneeze" && 0.3 <= this.actTime && this.actTime < 0.9) return true;
+    return this.act === "groom" && Math.trunc(this.actTime * 3) % 2 === 1;
   }
 
   get armsRaised() {
     if (this.mood === Mood.HELD || this.mood === Mood.RIDE || (this.mood === Mood.AIR && this.vy < 0)) return true;
     if (this.act === "wave") return Math.trunc(this.actTime * 6) % 2 === 0;
     if (this.act === "yawn") return this.actTime < 0.9;
+    if (this.act === "stretch") return 0.4 <= this.actTime && this.actTime < 1.3;
+    if (this.act === "fly") return 3.0 <= this.actTime && this.actTime < 3.5;
+    if (this.act === "saw") {
+      return SAW_FROM <= this.actTime && this.actTime < SAW_UNTIL && Math.trunc(this.actTime * 7) % 2 === 0;
+    }
     return this.act === "cesium" || (this.act === "gps" && this.actTime >= 1.2);
   }
 
   look() {
     if (this.act === "spoof" && this.actTime >= 0.4) return -1;
+    if (this.act === "oops" && this.actTime >= OOPS_BACK[1]) return -1;
+    if (this.act === "saw") return this.facing;
+    const fly = this.flyAt;
+    if (fly !== null) return Math.abs(fly[0]) < 10 ? 0 : (fly[0] > 0 ? 1 : -1);
     if (this.act === "look") return [-1, 1, 0][Math.trunc(this.actTime / 0.8) % 3];
     if (this.gaze !== null) {
       const dx = this.gaze[0] - this.x;
@@ -122,6 +180,12 @@ export class Pet {
     this.squash *= Math.exp(-10.0 * dt);
     if (Math.abs(this.squash) < 0.01) this.squash = 0.0;
     this.tickFeeling(dt);
+    this.tickPetting(dt);
+    if (this.speechLeft > 0.0) {
+      this.speechLeft = Math.max(0.0, this.speechLeft - dt);
+      if (this.speechLeft === 0.0) this.speech = null;
+    }
+    if (this.dizzy > 0.0) this.dizzy = Math.max(0.0, this.dizzy - dt);
     if (this.mood !== Mood.ACT) this.act = null;
     const handler = {
       [Mood.IDLE]: this.grounded, [Mood.WALK]: this.grounded, [Mood.SLEEP]: this.sleeping,
@@ -160,6 +224,17 @@ export class Pet {
     }
   }
 
+  // A click on it. One too many, too fast, and it is fed up -- cross, and tells you so.
+  poke() {
+    this.pokes = this.pokes.filter((at) => this.clock - at < POKE_WINDOW_S);
+    this.pokes.push(this.clock);
+    if (this.pokes.length < POKES_TO_FUME) return;
+    this.pokes = [];
+    this.speech = this.skin.fedUp;
+    this.speechLeft = SPEECH_S;
+    this.feel("angry", SPEECH_S);
+  }
+
   watch(x, y, seconds = 1.5) { this.gaze = [x, y]; this.gazeLeft = seconds; }
 
   startle() {
@@ -171,7 +246,8 @@ export class Pet {
   }
 
   perform(act) {
-    const known = Object.hasOwn(this.acts, act) || Object.hasOwn(REACTIONS, act);
+    const known = Object.hasOwn(this.acts, act) || Object.hasOwn(REACTIONS, act) || Object.hasOwn(EVERYDAY_ACTS, act);
+    if (act === "oops" && !this.skin.back) return false;
     if (!known || this.ledge === null || ![Mood.IDLE, Mood.WALK, Mood.LAND].includes(this.mood)) return false;
     this.act = act; this.actTime = 0.0; this.actBeat = 0.0;
     this.mood = Mood.ACT;
@@ -228,8 +304,70 @@ export class Pet {
         this.particles.push(new Particle("tear", side * (this.skin.width / 2 + 3), -this.skin.height * 0.85,
           side * 18.0, 40.0, 0.6));
       }
+    } else if (act === "groom") {
+      this.squash = 0.05 * Math.sin(t * 12.0);
+    } else if (act === "stretch") {
+      this.squash = t < 1.2 ? 0.3 * Math.sin(Math.PI * Math.min(t, 1.2) / 1.2) : -0.1;
+    } else if (act === "chase") {
+      this.walkPhase += dt * 14.0;
+      if (Math.floor(before / 0.22) < Math.floor(t / 0.22)) this.facing = -this.facing;
+      if (reached(EVERYDAY_ACTS.chase - 0.05)) {
+        this.say("?");
+        this.dizzy = 1.0;
+      }
+    } else if (act === "fly") {
+      if (reached(2.8)) this.squash = 0.25;
+      if (reached(3.0)) {
+        this.squash = -0.25;
+        this.say("!");
+        const fx = 30.0 * Math.cos(3.0 * 2.6);
+        const fy = -this.skin.height - 26.0;
+        this.particles.push(new Particle("puff", fx, fy, 0.0, -20.0, 0.5));
+      }
+    } else if (act === "sneeze") {
+      if (t < 0.8) this.squash = -0.18 * Math.min(1.0, t / 0.6);
+      if (reached(0.8)) {
+        this.squash = 0.28;
+        for (const spread of [-25.0, 0.0, 25.0]) {
+          this.particles.push(new Particle("puff", this.facing * this.skin.width / 2, -this.skin.height * 0.55,
+            this.facing * 110.0, spread, 0.5));
+        }
+      }
+    } else if (act === "sit") {
+      this.squash = Math.max(this.squash, 0.1);
+    } else if (act === "oops") {
+      const [backFrom, backUntil] = OOPS_BACK;
+      if (backFrom <= t && t < backUntil) this.squash = 0.05 * Math.sin(t * 11.0);
+      if (reached(backUntil)) {
+        this.squash = -0.2;
+        this.say("!");
+      } else if (t >= backUntil) {
+        this.squash = Math.max(this.squash, 0.12);
+        this.actBeat -= dt;
+        if (this.actBeat <= 0.0) {
+          this.actBeat = 0.7;
+          const side = this.rng.choice([-1, 1]);
+          this.particles.push(new Particle("tear", side * (this.skin.width / 2 + 2), -this.skin.height * 0.9,
+            side * 12.0, 30.0, 0.6));
+        }
+      }
+    } else if (act === "saw") {
+      const [plankX, plankY] = sawPlankAt(this);
+      if (SAW_FROM <= t && t < SAW_UNTIL) {
+        this.actBeat -= dt;
+        if (this.actBeat <= 0.0) {
+          this.actBeat = 0.12;
+          const x = plankX + this.rng.uniform(-3, 3);
+          this.particles.push(new Particle("dust", x, plankY + 4, this.rng.uniform(-25, 25), 70.0, 0.5));
+        }
+      }
+      if (reached(SAW_UNTIL)) {
+        this.particles.push(new Particle("puff", plankX, plankY, 0.0, -20.0, 0.5));
+        this.say("heart");
+      }
     }
-    const length = Object.hasOwn(this.acts, act) ? this.acts[act] : (Object.hasOwn(REACTIONS, act) ? REACTIONS[act] : 0.0);
+    const length = Object.hasOwn(this.acts, act) ? this.acts[act]
+      : (Object.hasOwn(REACTIONS, act) ? REACTIONS[act] : (EVERYDAY_ACTS[act] ?? 0.0));
     if (t >= length) this.endAct();
   }
 
@@ -309,6 +447,32 @@ export class Pet {
       this.blink = 0.12;
       this.nextBlink = this.rng.uniform(2.0, 6.0);
     }
+    if (this.ear > 0.0) this.ear = Math.max(0.0, this.ear - dt);
+    this.nextEar -= dt;
+    if (this.nextEar <= 0.0) {
+      this.ear = 0.18;
+      this.nextEar = this.rng.uniform(4.0, 10.0);
+    }
+  }
+
+  // The cursor moving over it, gently, is a hand stroking it: it purrs and stays put for it.
+  tickPetting(dt) {
+    const [cx, cy] = this.cursor;
+    const over = dist(cx - this.x, cy - (this.y - this.skin.height / 2)) < this.skin.width * 0.6;
+    const stroking = over && this.cursorStill < 0.3 && this.cursorSpeed < 900.0;
+    if (stroking && [Mood.IDLE, Mood.WALK, Mood.SLEEP, Mood.LAND, Mood.ACT].includes(this.mood)) {
+      this.petting += dt;
+    } else if (!over) {
+      this.petting = Math.max(0.0, this.petting - dt * 2.0);
+    }
+    if (!this.purring) return;
+    if (this.mood === Mood.WALK) this.mood = Mood.IDLE;
+    this.timer = Math.max(this.timer, 1.0);
+    this.purrBeat -= dt;
+    if (this.purrBeat <= 0.0) {
+      this.purrBeat = 0.9;
+      this.say(this.rng.choice(["heart", "~"]));
+    }
   }
 
   tickParticles(dt) {
@@ -338,6 +502,7 @@ export class Pet {
       }
     }
     this.timer -= dt;
+    if (this.dizzy > 0.0) return;
     if (this.quiet > SLEEP_AFTER && this.mood === Mood.IDLE) {
       this.perform("yawn");
       return;
@@ -388,6 +553,13 @@ export class Pet {
     if (this.emotion === null && this.rng.random() < LOOK_CHANCE) {
       this.perform("look");
       return;
+    }
+    if (this.emotion === null && this.rng.random() < EVERYDAY_CHANCE) {
+      const choices = Object.keys(EVERYDAY_ACTS)
+        .filter((act) => act !== this.lastAct && (act !== "oops" || this.skin.back));
+      this.perform(this.rng.choice(choices));
+      this.lastAct = this.act;
+      if (this.act !== null) return;
     }
     if (this.emotion === null && this.rng.random() < ACT_CHANCE) {
       const choices = Object.keys(this.acts).filter((act) => act !== this.lastAct);
@@ -504,12 +676,18 @@ export class Pet {
       this.y = ledge.y;
       this.ledge = ledge;
       this.squash = Math.min(0.35, 0.12 + this.vy / 4000.0);
+      this.vyAtLanding = this.vy;
       this.vx = this.vy = 0.0;
       if (this.pouncing) this.say("?");
+      const hard = this.vyAtLanding >= DIZZY_SPEED;
       this.pouncing = false;
       this.aimY = null;
       this.mood = Mood.LAND;
       this.timer = 0.25;
+      if (hard) {
+        this.dizzy = DIZZY_S;
+        this.timer = DIZZY_S;
+      }
     }
   }
 
@@ -622,6 +800,14 @@ const CAT_BODY = [
   ".CKHKKZZKKKKC.", "...KKKKKKKK..K",
 ];
 const CAT_ARMS_UP = [...CAT_BODY.slice(0, 8), "C.KKSSSSSSKK.C", ".KKKKKZZKKKKK.", "..KHKKZZKKKK..", CAT_BODY[11]];
+const CAT_GROOM = [...CAT_BODY.slice(0, 7), ".KKSSWWWWSSKC.", "..KKSSSSSSKKC.", "..KKKKZZKKKK..",
+  ".CKHKKZZKKKK..", CAT_BODY[11]];
+// From behind -- and the pink thong it did not mean anyone to see.
+const CAT_BACK = [
+  ".K..........K.", ".KK........KK.", ".KKKKKKKKKKKK.", "KKKKKKKKKKKKKK", "KKKKKKKKKKKKKK",
+  "KKKKKKKKKKKKKK", "KKKKKKKKKKKKKK", ".KKKKKKKKKKKK.", "..KKKKKKKKKK..", "..KPPKKKKPPK..",
+  ".CKKKPPPPKKKC.", "...KKKPPKKK..K",
+];
 const CAT_SAD_BODY = [...CAT_BODY.slice(0, 9), ".KKKKKZZKKKKK.", ".CKHKKZZKKKKC.", CAT_BODY[11]];
 const CAT_LEGS = {
   stand: ["...KK....KK.K.", "..KKK....KKK.."],
@@ -647,12 +833,34 @@ function catFace(rows, pet) {
     const shift = pet.look();
     for (const left of CAT_EYES) rows[4][left + shift] = rows[4][left + 1 + shift] = "W";
   }
-  if (pet.expression in CAT_MOUTH) [rows[6], rows[7]] = CAT_MOUTH[pet.expression].map((row) => [...row]);
+  if (pet.expression === "embarrassed") {
+    rows[5][2] = rows[5][3] = rows[5][10] = rows[5][11] = "b";
+    rows[7][6] = rows[7][7] = "M";
+  }
+  if (pet.expression in CAT_MOUTH) {
+    [rows[6], rows[7]] = CAT_MOUTH[pet.expression].map((row) => [...row]);
+  } else if (pet.act === "groom" && Math.trunc(pet.actTime * 6) % 2 === 0) {
+    rows[7][7] = "p";
+  } else if (pet.act === "sneeze" && pet.actTime < 0.8) {
+    rows[6][6] = rows[6][7] = "M";
+  }
+  if (pet.dizzy > 0.0 && !pet.eyesClosed) {
+    for (const left of CAT_EYES) {
+      rows[3][left] = rows[4][left + 1] = "W";
+      rows[4][left] = rows[3][left + 1] = "K";
+    }
+  }
+  if (pet.ear > 0.0) {
+    rows[0][1] = ".";
+    rows[0][2] = "K";
+  }
 }
 
 export class Skin {
   constructor(spec) {
-    Object.assign(this, { outline: false, stalks: false, ...spec });
+    Object.assign(this, {
+      outline: false, stalks: false, groom: null, tail: null, back: null, fedUp: "Hey! Stop poking me!", ...spec,
+    });
   }
   get columns() { return this.body[0].length; }
   get rows() { return this.body.length + 2; }
@@ -671,8 +879,10 @@ export const CAT = new Skin({
   face: catFace,
   palette: {
     K: "#16161C", H: "#3C4150", S: "#E8B99A", p: "#E4775F", W: "#FFFFFF", M: "#7A2E34", Z: "#D5DAE3", C: "#9EA7B8",
+    P: "#FF5FA8", b: "#F2789A",
   },
   angry: { S: "p" }, tears: [[5.0, 2.5], [5.0, 11.5]], outline: true, stalks: true,
+  groom: CAT_GROOM, tail: [[11, 13], [10, 13]], back: CAT_BACK, fedUp: "אין לי מפתח לשירותים פה!",
 });
 export const SKINS = { clawd: CLAWD, cat: CAT };
 
@@ -680,11 +890,24 @@ export function skinNamed(key) { return SKINS[key] ?? CLAWD; }
 
 export function frame(pet) {
   const skin = pet.skin;
-  const body = pet.armsRaised ? skin.armsUp : (pet.expression === "sad" ? skin.sadBody : skin.body);
+  if (pet.facingAway && skin.back) {
+    return [...skin.back, ...skin.legs.stand];
+  }
+  let body;
+  if (pet.act === "groom" && skin.groom) body = skin.groom;
+  else if (pet.armsRaised) body = skin.armsUp;
+  else body = pet.expression === "sad" ? skin.sadBody : skin.body;
   let rows = body.map((row) => [...row]);
   skin.face(rows, pet);
   if (pet.expression === "angry") rows = rows.map((row) => row.map((cell) => skin.angry[cell] ?? cell));
   rows.push(...skin.legs[legsFor(pet)].map((row) => [...row]));
+  if (skin.tail && pet.tailUp) {
+    const [[downRow, downCol], [upRow, upCol]] = skin.tail;
+    if (rows[downRow][downCol] !== "." && rows[upRow][upCol] === ".") {
+      rows[upRow][upCol] = rows[downRow][downCol];
+      rows[downRow][downCol] = ".";
+    }
+  }
   return rows.map((row) => row.join(""));
 }
 
@@ -695,6 +918,8 @@ function legsFor(pet) {
   if (pet.mood === Mood.CROUCH && pet.pouncing && pet.stalks) return stepping();
   if (pet.act === "jam" && pet.actTime >= 2.2) return stepping();
   if (pet.act === "pps" && pet.actTime >= 1.0 && pet.actTime % 1.0 < 0.15) return "walk_a";
+  if (pet.act === "chase") return stepping();
+  if (pet.act === "sit" || pet.act === "groom" || (pet.act === "stretch" && pet.actTime < 1.2)) return "tuck";
   return "stand";
 }
 
@@ -704,16 +929,34 @@ export const PROPS = {
   zigzag: [["x...x...x", ".x.x.x.x.", "..x...x.."], { x: "#E0442E" }],
   clock: [[".ggggg.", "gwwwwwg", "gwwkwwg", "gwwkkwg", "gwwwwwg", "gwwwwwg", ".ggggg."],
     { g: "#6B6B6B", w: "#FFFFFF", k: "#1E1E1E" }],
+  plank: [["wwwwdwwwwwww", "dddddddddddd", "wwwwwwwdwwww"], { w: "#C8925A", d: "#A0703F" }],
+  half_plank: [["wwwwdw", "dddddd", "wwwwww"], { w: "#C8925A", d: "#A0703F" }],
+  saw: [["hhh.........", "hhbbbbbbbbbb", "hh.t.t.t.t.t"], { h: "#B5482F", b: "#C9CED6", t: "#8A929E" }],
 };
+// The saw held from the other side: handle towards the pet either way.
+PROPS.saw_left = [PROPS.saw[0].map((row) => [...row].reverse().join("")), PROPS.saw[1]];
+
+// Where the plank of a "saw" act is, from the feet: lifted off the floor to its paws, on the side it faces.
+export function sawPlankAt(pet) {
+  const lift = Math.min(1.0, pet.actTime / SAW_FROM);
+  return [pet.facing * 30.0, -4.0 - lift * (pet.skin.height * 0.45 - 4.0)];
+}
 
 export function ghostOffset(t) { return -Math.min(40.0, Math.max(0.0, t - 0.4) * 30.0); }
 
 export function actView(pet) {
-  const view = { props: [], labels: [], shift: {}, ghost: null, noise: null, wave: null, orbit: null, bars: null, dots: null };
+  const view = {
+    props: [], labels: [], shift: {}, ghost: null, noise: null, wave: null, orbit: null, bars: null, dots: null,
+    fly: null, stars: null, speech: null,
+  };
   const act = pet.act;
   const t = pet.actTime;
   const top = -pet.skin.height;
   if (pet.thinking && act === null && pet.mood !== Mood.SLEEP) view.dots = 1 + (Math.trunc(pet.clock * 3) % 3);
+  if (pet.dizzy > 0.0) view.stars = pet.clock * 6.0;
+  if (pet.speech) view.speech = pet.speech;
+  const fly = pet.flyAt;
+  if (fly !== null) view.fly = [fly[0], fly[1], Math.trunc(pet.clock * 20) % 2 === 0];
   if (act === "gps") {
     if (t < 1.2) {
       view.props.push(["satellite", 0.0, top - 44, Math.min(1.0, t)]);
@@ -749,6 +992,19 @@ export function actView(pet) {
       view.props.push(["clock", 0.0, top * 0.45, 1.0]);
       const text = t < 3.0 ? "HOLDOVER" : `+${((t - 1.0) * 1.6).toFixed(1)} ns`;
       view.labels.push([text, 0.0, top - 20, t < 3.0 ? "dim" : "bad"]);
+    }
+  } else if (act === "saw") {
+    const [x, y] = sawPlankAt(pet);
+    if (t < SAW_UNTIL) {
+      view.props.push(["plank", x, y, 1.0]);
+      if (t >= SAW_FROM) {
+        const stroke = 7.0 * Math.sin((t - SAW_FROM) * 14.0);
+        view.props.push([pet.facing > 0 ? "saw" : "saw_left", x + stroke, y - 8.0, 1.0]);
+      }
+    } else {
+      const fall = t - SAW_UNTIL;
+      const drop = Math.min(-4.0, y + 160.0 * fall * fall);
+      for (const side of [-1, 1]) view.props.push(["half_plank", x + side * (9.0 + 25.0 * fall), drop, 1.0]);
     }
   }
   return view;

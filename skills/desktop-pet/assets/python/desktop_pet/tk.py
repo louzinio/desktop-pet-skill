@@ -6,18 +6,20 @@
 
 Tk widgets cannot be transparent, so the pet is drawn as a handful of small coloured
 frames -- one per run of same-coloured pixels -- placed over the window. Everything else
-in the window stays clickable. The body, the face, the feelings and the tears, puffs,
-hearts and veins and the thinking dots are drawn; the text marks ("!", "z"...) and the act
-props are not.
+in the window stays clickable. The body, the face, the feelings, the tears, puffs, dust,
+hearts and veins, the act props, the fly, the dizzy stars and the thinking dots are drawn,
+and what it says comes up in a small label over its head; the text marks ("!", "z"...)
+are not drawn.
 """
 
 from __future__ import annotations
 
+import math
 import time
 import tkinter as tk
 from collections.abc import Callable, Iterable
 
-from .core import GNSS_ACTS, PIXEL, Bounds, Ledge, Pet, act_view, frame, skin_named
+from .core import GNSS_ACTS, PIXEL, PROPS, Bounds, Ledge, Pet, act_view, frame, skin_named
 
 FRAME_MS = 16
 PERCH_REFRESH_S = 0.5
@@ -36,6 +38,10 @@ _TEAR = "#5DB8F0"
 _PUFF = "#7D8691"
 _DOT_ON = "#7A8BA8"
 _DOT_OFF = "#C9CED6"
+_DUST = "#D9B07A"
+_FLY = "#2B2B33"
+_STAR = "#F2B632"
+_PROP_PIXEL = 3
 
 
 class TkPet:
@@ -55,6 +61,7 @@ class TkPet:
         self._job = None
         self._samples: list[tuple[float, float, float]] = []
         self._grip = (0.0, 0.0)
+        self._bubble: tk.Label | None = None
 
     # -- the app's side ------------------------------------------------------------------
 
@@ -70,6 +77,8 @@ class TkPet:
             self._job = None
         for tile in self._pool:
             tile.place_forget()
+        if self._bubble is not None:
+            self._bubble.place_forget()
 
     def set_skin(self, key: str) -> None:
         self.pet.skin = skin_named(key)
@@ -136,7 +145,7 @@ class TkPet:
             tile.bind("<ButtonPress-1>", self._press)
             tile.bind("<B1-Motion>", self._move)
             tile.bind("<ButtonRelease-1>", self._release)
-            tile.bind("<Double-Button-1>", lambda _event: self.pet.cheer())
+            tile.bind("<Double-Button-1>", self._double)
             self._pool.append(tile)
         tile = self._pool[self._used]
         self._used += 1
@@ -149,8 +158,9 @@ class TkPet:
         pet = self.pet
         rows = frame(pet)
         palette = pet.skin.palette
-        across = PIXEL * (1.0 + pet.squash)
-        down = PIXEL * (1.0 - pet.squash)
+        squash = pet.squash + pet.breathing
+        across = PIXEL * (1.0 + squash)
+        down = PIXEL * (1.0 - squash)
         left = pet.x - len(rows[0]) * across / 2
         top = pet.y - len(rows) * down
         for r, row in enumerate(rows):
@@ -163,7 +173,27 @@ class TkPet:
                 if cell in palette:
                     self._tile(left + c * across, top + r * down, (end - c) * across, down, palette[cell])
                 c = end
-        dots = act_view(pet).dots
+        view = act_view(pet)
+        for name, x, y, alpha in view.props:
+            if alpha < 0.5:
+                continue
+            grid, colours = PROPS[name]
+            prop_left = pet.x + x - len(grid[0]) * _PROP_PIXEL / 2
+            prop_top = pet.y + y - len(grid) * _PROP_PIXEL / 2
+            for r, row in enumerate(grid):
+                for c, mark in enumerate(row):
+                    if mark in colours:
+                        self._tile(prop_left + c * _PROP_PIXEL, prop_top + r * _PROP_PIXEL,
+                                   _PROP_PIXEL, _PROP_PIXEL, colours[mark])
+        if view.fly is not None:
+            self._tile(pet.x + view.fly[0] - 1.5, pet.y + view.fly[1] - 1.5, 3, 3, _FLY)
+        if view.stars is not None:
+            for i in range(3):
+                phase = view.stars + i * 2.0 * math.pi / 3
+                self._tile(pet.x + 20 * math.cos(phase) - 2, pet.y - pet.skin.height - 6 + 5 * math.sin(phase) - 2,
+                           4, 4, _STAR)
+        self._say(view.speech)
+        dots = view.dots
         if dots is not None:
             for i in range(3):
                 self._tile(pet.x - 11 + i * 8, pet.y - pet.skin.height - 12, 5, 5, _DOT_ON if i < dots else _DOT_OFF)
@@ -171,6 +201,8 @@ class TkPet:
             x, y = pet.x + particle.x, pet.y + particle.y
             if particle.kind == "tear":
                 self._tile(x - 1.5, y, 3, 5, _TEAR)
+            elif particle.kind == "dust":
+                self._tile(x - 1.5, y - 1.5, 3, 3, _DUST)
             elif particle.kind == "puff":
                 size = 4 + (0.6 - particle.life) * 10
                 self._tile(x - size / 2, y - size / 2, size, size, _PUFF)
@@ -183,9 +215,31 @@ class TkPet:
         for tile in self._pool[self._used:]:
             tile.place_forget()
 
+    def _say(self, text: str | None) -> None:
+        """What it says, in a label over its head -- Tk has no transparent text to float."""
+        if not text:
+            if self._bubble is not None:
+                self._bubble.place_forget()
+            return
+        if self._bubble is None:
+            self._bubble = tk.Label(self.root, background="#FFFFFF", foreground="#16161C", borderwidth=1,
+                                    relief="solid", padx=6, pady=2, font=("TkDefaultFont", 9, "bold"),
+                                    wraplength=150, takefocus=0)
+        self._bubble.configure(text=text)
+        self._bubble.update_idletasks()
+        width, height = self._bubble.winfo_reqwidth(), self._bubble.winfo_reqheight()
+        self._bubble.place(x=round(self.pet.x - width / 2), y=round(self.pet.y - self.pet.skin.height - 16 - height))
+        self._bubble.lift()
+
     # -- picking it up ---------------------------------------------------------------------
 
+    def _double(self, _event) -> None:
+        self.pet.poke()
+        if self.pet.speech is None:
+            self.pet.cheer()
+
     def _press(self, event) -> None:
+        self.pet.poke()
         x, y = event.x_root - self.root.winfo_rootx(), event.y_root - self.root.winfo_rooty()
         self._grip = (self.pet.x - x, self.pet.y - y)
         self._samples = [(time.monotonic(), float(x), float(y))]

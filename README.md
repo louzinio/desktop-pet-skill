@@ -16,6 +16,9 @@ copied in, one place to attach it and four hooks -- the whole change is
 
 It started as the companion in [OFIR](https://github.com/louzinio/ofir-project), an atomic
 clock test bench, and comes with both of its skins: **Clawd** and the cat **Amir Latex**.
+Left alone it grooms, stretches, chases its tail, swats a fly, sneezes and saws planks for
+the fun of it; the cat now and then turns round with a pink thong showing and is mortified.
+Click it five times fast and it tells you off in a speech bubble.
 
 ## Install
 

@@ -100,3 +100,20 @@ def test_real_clicks_reach_the_app_except_on_the_pet(window):
     assert pet.pet.mood is not Mood.HELD
     assert clicked == ["other"], "the press on the pet must not click the button under it"
     pet.stop()
+
+
+def test_the_saw_and_what_it_says_draw_without_error(window):
+    win, _button, _ = window
+    pet = GtkPet(win, skin="cat")
+    pet.pet.rng = Mulberry32(4)
+    _pump(0.1)
+    pet.start()
+    assert _landed(pet)
+    pet.pet.mood, pet.pet.timer = Mood.IDLE, 60.0
+    assert pet.pet.perform("saw")
+    _pump(1.5)
+    for _ in range(5):
+        pet.pet.poke()
+    _pump(0.3)
+    assert pet.pet.speech == pet.pet.skin.fed_up
+    pet.stop()

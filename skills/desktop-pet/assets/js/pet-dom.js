@@ -35,12 +35,17 @@ const SIGNAL = "#3E6FD8";
 const NOISE = ["#9AA3B0", "#6B6B6B", "#E0442E", "#3E6FD8"];
 const BAR_ON = "#3FA34D";
 const BAR_OFF = "#C9CED6";
+const FLY = "#2B2B33";
+const STAR = "#F2B632";
+const DUST = "#D9B07A";
+const BUBBLE_EDGE = "#16161C";
 
 export function paintPet(ctx, pet, { width = WIDTH, feet = FEET, dark = false } = {}) {
   const rows = frame(pet);
   const palette = pet.skin.palette;
-  const across = PIXEL * (1.0 + pet.squash);
-  const down = PIXEL * (1.0 - pet.squash);
+  const squash = pet.squash + pet.breathing;
+  const across = PIXEL * (1.0 + squash);
+  const down = PIXEL * (1.0 - squash);
   const left = width / 2 - (rows[0].length * across) / 2;
   const top = feet - rows.length * down;
   const view = actView(pet);
@@ -81,6 +86,8 @@ function paintParticles(ctx, pet, width, feet) {
     const y = feet + p.y;
     if (p.kind === "tear") {
       ctx.fillStyle = TEAR; ctx.fillRect(x - 1.5, y, 3, 5);
+    } else if (p.kind === "dust") {
+      ctx.fillStyle = DUST; ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
     } else if (p.kind === "ring") {
       const grow = (0.4 - p.life) * 90;
       ctx.strokeStyle = SIGNAL; ctx.lineWidth = 2;
@@ -158,17 +165,64 @@ function paintAct(ctx, pet, view, width, feet) {
     }
     ctx.fillStyle = TONES.bad; ctx.fillRect(cx - 3, cy - 3, 6, 6);
   }
+  if (view.fly !== null) {
+    const [fx, fy, wingsUp] = view.fly;
+    const x = centre + fx;
+    const y = feet + fy;
+    const wing = wingsUp ? -3 : 0;
+    ctx.globalAlpha = 0.55; ctx.fillStyle = BAR_OFF;
+    ctx.fillRect(x - 4, y - 2 + wing, 3, 2); ctx.fillRect(x + 1, y - 2 + wing, 3, 2);
+    ctx.globalAlpha = 1.0; ctx.fillStyle = FLY; ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+  }
+  if (view.stars !== null) {
+    ctx.fillStyle = STAR;
+    for (let i = 0; i < 3; i++) {
+      const phase = view.stars + (i * 2 * Math.PI) / 3;
+      const sx = centre + 20 * Math.cos(phase);
+      const sy = top - 6 + 5 * Math.sin(phase);
+      ctx.fillRect(sx - 1, sy - 3, 2, 6); ctx.fillRect(sx - 3, sy - 1, 6, 2);
+    }
+  }
   if (view.dots !== null) {
     for (let i = 0; i < 3; i++) {
       ctx.fillStyle = i < view.dots ? TONES.dim : BAR_OFF;
       ctx.fillRect(centre - 11 + i * 8, top - 12, 5, 5);
     }
   }
+  if (view.speech) paintSpeech(ctx, view.speech, width, top);
   ctx.font = "bold 10px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   for (const [text, x, y, tone] of view.labels) {
     ctx.fillStyle = TONES[tone];
     ctx.fillText(text, centre + x, feet + y);
   }
+}
+
+// A speech bubble over its head, wrapped to fit the pet's own box, its tail pointing down.
+function paintSpeech(ctx, text, width, top) {
+  ctx.font = "bold 11px sans-serif";
+  const room = width - 16;
+  const lines = [];
+  for (const word of text.split(" ")) {
+    const line = lines.length ? `${lines[lines.length - 1]} ${word}` : word;
+    if (lines.length && ctx.measureText(line).width <= room) lines[lines.length - 1] = line;
+    else lines.push(word);
+  }
+  const textWidth = Math.min(room, Math.max(...lines.map((line) => ctx.measureText(line).width)));
+  const w = textWidth + 12;
+  const h = lines.length * 13 + 6;
+  const x = width / 2 - w / 2;
+  const y = top - 18 - h;
+  ctx.lineWidth = 1.5; ctx.strokeStyle = BUBBLE_EDGE; ctx.fillStyle = "#FFFFFF";
+  ctx.beginPath();
+  ctx.roundRect?.(x, y, w, h, 6) ?? ctx.rect(x, y, w, h);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(width / 2 - 5, y + h - 0.5); ctx.lineTo(width / 2, top - 10); ctx.lineTo(width / 2 + 5, y + h - 0.5);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = BUBBLE_EDGE; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.direction = /[\u0590-\u08FF]/.test(text) ? "rtl" : "ltr"; // Hebrew, Arabic: the "!" goes on the left
+  lines.forEach((line, i) => ctx.fillText(line, width / 2, y + 3 + 6.5 + i * 13));
+  ctx.direction = "inherit";
 }
 
 export function attachPet({
@@ -261,6 +315,7 @@ export function attachPet({
     if (event.button !== 0) return;
     event.preventDefault();
     hit.setPointerCapture(event.pointerId);
+    pet.poke();
     grip = [pet.x - event.clientX, pet.y - event.clientY];
     samples = [[performance.now() / 1000, event.clientX, event.clientY]];
     pet.grab();
@@ -284,7 +339,8 @@ export function attachPet({
   };
   hit.addEventListener("pointerup", release);
   hit.addEventListener("pointercancel", release);
-  hit.addEventListener("dblclick", () => { samples = []; pet.cheer(); });
+  // Both presses of a double click were poked already, on pointerdown.
+  hit.addEventListener("dblclick", () => { samples = []; if (pet.speech === null) pet.cheer(); });
 
   place();
   frameId = requestAnimationFrame(tick);

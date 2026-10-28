@@ -88,3 +88,22 @@ def test_a_press_on_the_pet_picks_it_up_and_a_drag_throws_it(window):
     pet._release(None)
     assert pet.pet.mood is Mood.AIR and pet.pet.vx > 0 and pet.pet.vy < 0
     pet.stop()
+
+
+def test_the_saw_and_what_it_says_are_drawn(window):
+    root, _ = window
+    pet = TkPet(root, skin="cat")
+    pet.pet.rng = Mulberry32(4)
+    pet.start()
+    assert _landed(root, pet)
+    pet.pet.mood, pet.pet.timer = Mood.IDLE, 60.0
+    assert pet.pet.perform("saw")
+    _pump(root, 1.5)
+    shown = [tile for tile in pet._pool if tile.winfo_ismapped()]
+    assert any(tile.cget("background").upper() == "#C8925A" for tile in shown)  # the plank
+    for _ in range(5):
+        pet.pet.poke()
+    _pump(root, 0.1)
+    assert pet._bubble is not None and pet._bubble.winfo_ismapped()
+    assert pet._bubble.cget("text") == pet.pet.skin.fed_up
+    pet.stop()

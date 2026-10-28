@@ -78,3 +78,12 @@ def test_the_pet_is_drawn(page):
         return count;
     }""")
     assert painted > 500
+
+
+def test_clicked_five_times_fast_it_says_its_line(page):
+    _landed_on(page, "#save")
+    for _ in range(5):
+        box = page.locator("[data-desktop-pet=body]").bounding_box()
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    assert page.evaluate("window.pet.core.speech") == page.evaluate("window.pet.core.skin.fedUp")
+    assert page.evaluate("window.clicks") == []

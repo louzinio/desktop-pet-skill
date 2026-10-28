@@ -110,16 +110,20 @@ _SIGNAL = "#3E6FD8"
 _NOISE = ("#9AA3B0", "#6B6B6B", "#E0442E", "#3E6FD8")
 _BAR_ON = "#3FA34D"
 _BAR_OFF = "#C9CED6"
-_PICKER_CLICKS = 3
-_PICKER_WINDOW_S = 0.8
+_FLY = "#2B2B33"
+_STAR = "#F2B632"
+_DUST = "#D9B07A"
+_BUBBLE = "#FFFFFF"
+_BUBBLE_EDGE = "#16161C"
 
 
 def paint_pet(painter, pet: Pet, width: float = WIDTH, feet: float = FEET, dark: bool = False) -> None:
     """Draws the pet, its act and its particles, feet at (width / 2, feet) in painter coordinates."""
     colours = {cell: QColor(value) for cell, value in pet.skin.palette.items()}
     rows = frame(pet)
-    across = PIXEL * (1.0 + pet.squash)
-    down = PIXEL * (1.0 - pet.squash)
+    squash = pet.squash + pet.breathing
+    across = PIXEL * (1.0 + squash)
+    down = PIXEL * (1.0 - squash)
     left = width / 2 - len(rows[0]) * across / 2
     top = feet - len(rows) * down
     view = act_view(pet)
@@ -158,6 +162,8 @@ def _paint_particles(painter, pet: Pet, width: float, feet: float) -> None:
         x, y = width / 2 + particle.x, feet + particle.y
         if particle.kind == "tear":
             painter.fillRect(QRectF(x - 1.5, y, 3, 5), QColor(_TEAR))
+        elif particle.kind == "dust":
+            painter.fillRect(QRectF(x - 1.5, y - 1.5, 3, 3), QColor(_DUST))
         elif particle.kind == "ring":
             grow = (0.4 - particle.life) * 90
             painter.setPen(QPen(QColor(_SIGNAL), 2))
@@ -212,7 +218,7 @@ def _paint_act(painter, pet: Pet, view: ActView, width: float, feet: float) -> N
             high = base - (10 if i == view.wave else 4)
             points += [QPointF(x, base), QPointF(x, high), QPointF(x + 6, high), QPointF(x + 6, base)]
         points.append(QPointF(centre + 50, base))
-        for a, b in zip(points, points[1:]):
+        for a, b in zip(points, points[1:], strict=False):
             painter.drawLine(a, b)
     if view.orbit is not None:
         cx, cy = centre, top - 20
@@ -227,10 +233,28 @@ def _paint_act(painter, pet: Pet, view: ActView, width: float, feet: float) -> N
             painter.fillRect(QRectF(22 * math.cos(phase) - 2, 7 * math.sin(phase) - 2, 4, 4), QColor(_SIGNAL))
             painter.restore()
         painter.fillRect(QRectF(cx - 3, cy - 3, 6, 6), QColor(_TONES["bad"]))
+    if view.fly is not None:
+        fx, fy, wings_up = view.fly
+        x, y = centre + fx, feet + fy
+        painter.setOpacity(0.55)
+        wing = -3.0 if wings_up else 0.0
+        painter.fillRect(QRectF(x - 4, y - 2 + wing, 3, 2), QColor(_BAR_OFF))
+        painter.fillRect(QRectF(x + 1, y - 2 + wing, 3, 2), QColor(_BAR_OFF))
+        painter.setOpacity(1.0)
+        painter.fillRect(QRectF(x - 1.5, y - 1.5, 3, 3), QColor(_FLY))
+    if view.stars is not None:
+        cx, cy = centre, top - 6
+        for i in range(3):
+            phase = view.stars + i * 2.0 * math.pi / 3
+            sx, sy = cx + 20 * math.cos(phase), cy + 5 * math.sin(phase)
+            painter.fillRect(QRectF(sx - 1, sy - 3, 2, 6), QColor(_STAR))
+            painter.fillRect(QRectF(sx - 3, sy - 1, 6, 2), QColor(_STAR))
     if view.dots is not None:
         for i in range(3):
             painter.fillRect(QRectF(centre - 11 + i * 8, top - 12, 5, 5),
                              QColor(_TONES["dim"] if i < view.dots else _BAR_OFF))
+    if view.speech:
+        _paint_speech(painter, view.speech, width, top)
     font = QFont("Monospace")
     font.setStyleHint(_scoped(QFont, "StyleHint", "Monospace"))
     font.setBold(True)
@@ -239,6 +263,27 @@ def _paint_act(painter, pet: Pet, view: ActView, width: float, feet: float) -> N
     for text, x, y, tone in view.labels:
         painter.setPen(QColor(_TONES[tone]))
         painter.drawText(QRectF(centre + x - 50, feet + y - 7, 100, 14), _enum("AlignmentFlag", "AlignCenter"), text)
+
+
+def _paint_speech(painter, text: str, width: float, top: float) -> None:
+    """A speech bubble over its head, wrapped to fit the pet's own box, its tail pointing down."""
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(11)
+    painter.setFont(font)
+    flags = _enum("AlignmentFlag", "AlignCenter") | _enum("TextFlag", "TextWordWrap")
+    text_box = painter.boundingRect(QRectF(0, 0, width - 16, 200), flags, text)
+    bubble = QRectF(width / 2 - text_box.width() / 2 - 6, top - 18 - text_box.height() - 6,
+                    text_box.width() + 12, text_box.height() + 6)
+    painter.setPen(QPen(QColor(_BUBBLE_EDGE), 1.5))
+    painter.setBrush(QColor(_BUBBLE))
+    painter.drawRoundedRect(bubble, 6, 6)
+    centre = width / 2
+    painter.drawPolygon(QtGui.QPolygonF([QPointF(centre - 5, top - 18.5), QPointF(centre + 5, top - 18.5),
+                                         QPointF(centre, top - 10)]))
+    painter.setPen(QColor(_BUBBLE_EDGE))
+    painter.drawText(bubble, flags, text)
+    painter.setBrush(_enum("BrushStyle", "NoBrush"))
 
 
 class _Base(QWidget):
@@ -257,7 +302,6 @@ class _Base(QWidget):
         self._perches: list = []
         self._perches_age = PERCH_REFRESH_S
         self._on_skin = on_skin
-        self._clicks: list[float] = []
         self._samples: list[tuple[float, float, float]] = []
         self._grip = (0.0, 0.0)
         self._typed_in = None
@@ -359,11 +403,6 @@ class _Base(QWidget):
             self.pet.startle()
         self._modal = modal
 
-    def _count_click(self) -> bool:
-        now = self._since.elapsed() / 1000.0
-        self._clicks = [t for t in self._clicks if now - t < _PICKER_WINDOW_S] + [now]
-        return len(self._clicks) >= _PICKER_CLICKS
-
     def _pick_skin(self) -> None:
         chosen = self.skin_menu().exec(QCursor.pos()) if hasattr(QMenu, "exec") else self.skin_menu().exec_(QCursor.pos())
         if chosen is not None and chosen.data() != self.pet.skin.key:
@@ -375,7 +414,7 @@ class _Base(QWidget):
     # -- picking it up ---------------------------------------------------------------------
 
     def _press(self, gx: float, gy: float) -> None:
-        self._clicks_done = self._count_click()
+        self.pet.poke()
         x, y = self._global_to_pet(gx, gy)
         self._grip = (self.pet.x - x, self.pet.y - y)
         self._samples = [(self._since.elapsed() / 1000.0, x, y)]
@@ -393,9 +432,6 @@ class _Base(QWidget):
         span = last[0] - first[0]
         self.pet.throw(*(((last[1] - first[1]) / span, (last[2] - first[2]) / span) if span > 0 else (0.0, 0.0)))
         self._samples = []
-        if getattr(self, "_clicks_done", False):
-            self._clicks = []
-            QTimer.singleShot(0, self._pick_skin)
 
     def _dark_now(self) -> bool:
         if self._dark is not None:
@@ -478,15 +514,22 @@ class WindowPet(_Base):
                 self._release()
                 return True
             return False
-        if event.button() != _enum("MouseButton", "LeftButton"):
+        button = event.button()
+        if button not in (_enum("MouseButton", "LeftButton"), _enum("MouseButton", "RightButton")):
             return False
         x, y = self._global_to_pet(gx, gy)
         left, top, width, height = self.body_rect()
         if not (left <= x <= left + width and top <= y <= top + height):
             return False
+        if button == _enum("MouseButton", "RightButton"):
+            if kind == _event("MouseButtonPress"):
+                QTimer.singleShot(0, self._pick_skin)
+            return True
         if kind == _event("MouseButtonDblClick"):
             self._samples = []
-            self.pet.cheer()
+            self.pet.poke()
+            if self.pet.speech is None:
+                self.pet.cheer()
         else:
             self._press(gx, gy)
         return True
@@ -554,6 +597,8 @@ class DesktopPet(_Base):
     def mousePressEvent(self, event) -> None:
         if event.button() == _enum("MouseButton", "LeftButton"):
             self._press(*_global_pos(event))
+        elif event.button() == _enum("MouseButton", "RightButton"):
+            QTimer.singleShot(0, self._pick_skin)
 
     def mouseMoveEvent(self, event) -> None:
         if self._samples:
@@ -565,4 +610,6 @@ class DesktopPet(_Base):
 
     def mouseDoubleClickEvent(self, event) -> None:
         self._samples = []
-        self.pet.cheer()
+        self.pet.poke()
+        if self.pet.speech is None:
+            self.pet.cheer()

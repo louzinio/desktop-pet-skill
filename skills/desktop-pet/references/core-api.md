@@ -67,11 +67,13 @@ rows = frame(pet)            # e.g. 9 strings of 16 letters for Clawd, 14 x 14 f
 palette = pet.skin.palette   # letter -> "#RRGGBB"; letters not in it are transparent
 ```
 
-Each letter is one `PIXEL` (4 px) square. Squash and stretch:
+Each letter is one `PIXEL` (4 px) square. Squash and stretch, plus a slow breath while it
+stands or sleeps:
 
 ```
-across = PIXEL * (1 + pet.squash)
-down   = PIXEL * (1 - pet.squash)
+squash = pet.squash + pet.breathing
+across = PIXEL * (1 + squash)
+down   = PIXEL * (1 - squash)
 left   = pet.x - len(rows[0]) * across / 2
 top    = pet.y - len(rows) * down
 cell (r, c) -> rectangle(left + c * across, top + r * down, across, down)
@@ -92,6 +94,7 @@ are relative to the pet's feet. Fade with `alpha = clamp(life * 2, 0, 1)`.
 | kind | draw |
 | --- | --- |
 | `tear` | 3 x 5 px `#5DB8F0` |
+| `dust` | 3 x 3 px sawdust `#D9B07A` |
 | `puff` | grey `#7D8691` square, `4 + (0.6 - life) * 10` px wide |
 | `heart`, `vein` | 5-wide pixel shapes at 3 px per cell (see `_SHAPES` in qt.py) |
 | `ring` | a growing blue ellipse (1PPS act only) |
@@ -104,8 +107,20 @@ An adapter that cannot draw text (Tk tiles) may skip the text kinds; the pet sti
 `act_view(pet)` returns what the current act needs drawn around the pet: `props` (small
 pixel sprites from `PROPS`), `labels` (text with a tone), `shift` (rows offset sideways),
 `ghost` (a translucent copy offset by x), `noise`, `wave`, `orbit`, `bars`, `dots`
-(thinking). All positions are relative to the feet. It is empty for a pet with no act;
-adapters that do not draw props (Tk, GTK) are fine as long as acts stay off.
+(thinking), `fly` (the fly of the "fly" act: x, y and whether its wings are up), `stars`
+(the phase of three stars going round its head while dizzy) and `speech` (a line to show in
+a bubble over its head -- wrap it to the pet's 120 px box, and lay it out right to left
+when it is Hebrew or Arabic). All positions are relative to the feet. It is empty for a pet
+with no act. Every adapter draws the props; the Tk one shows `speech` in a label.
+
+### Everyday acts
+
+Besides the opt-in packs, the pet does things on its own (`EVERYDAY_ACTS`): washes a paw
+(`groom`), `stretch`es, `chase`s its tail (and ends dizzy), swats a `fly`, `sneeze`s,
+`sit`s, and picks up a plank and `saw`s it in two. A skin drawn from behind (`Skin.back`,
+the cat's) also has `oops`: it turns round with a pink thong in full view, then turns back
+blushing. Stroke it with the cursor and it purrs (`pet.purring`); throw it hard and it lands
+seeing stars (`pet.dizzy`).
 
 ## Input: grabbing, dragging, throwing
 
@@ -120,7 +135,10 @@ pet.drag_to(x + grip[0], y + grip[1])       # keep the last ~0.1 s of (time, x, 
 pet.throw(vx, vy)                            # velocity from the first and last sample
 ```
 
-A double-click is `pet.cheer()`. Every press outside the body must reach the app: the
+Every press on the body also calls `pet.poke()`: five within two seconds and it is fed up --
+cross, saying `pet.skin.fed_up` in a bubble ("Hey! Stop poking me!" for Clawd; the cat says
+it has no key to the toilets here). A double-click is `pet.cheer()`, unless that left it
+fed up. In the Qt adapter a right-click on the pet opens the skin menu. Every press outside the body must reach the app: the
 adapters get that from an input region (GTK), a hit box only as big as the body (web), an
 application event filter that only takes presses on the body (Qt), or by being made of
 opaque tiles only where the pet is (Tk).
@@ -133,6 +151,7 @@ opaque tiles only where the pet is (Tk).
 | `pet.cheer()` | a heart and a jump |
 | `pet.startle()` | "!" and a hop |
 | `pet.watch(x, y)` | looks at a point for 1.5 s (typing in a field) |
+| `pet.poke()` | a click on it -- see above |
 | `pet.thinking = True/False` | three dots above its head |
 | `pet.perform(name)` | an act or reaction (`"wave"`, `"look"`, `"yawn"`, or an enabled act) |
 | `pet.skin = skin_named("cat")` | changes skin |
@@ -141,14 +160,17 @@ opaque tiles only where the pet is (Tk).
 ## Skins
 
 ```python
-Skin(key, name, body, arms_up, sad_body, legs, face, palette, angry, tears, outline=False, stalks=False)
+Skin(key, name, body, arms_up, sad_body, legs, face, palette, angry, tears, outline=False, stalks=False,
+     groom=None, tail=None, back=None, fed_up="Hey! Stop poking me!")
 ```
 
 `body`, `arms_up`, `sad_body` are equal-sized row tuples; `legs` maps `stand`, `walk_a`,
 `walk_b`, `tuck`, `dangle` to two extra rows; `face(rows, pet)` edits the rows in place for
 eyes, blinking and expressions; `angry` swaps palette letters when furious; `tears` are
-(row, column) spots tears fall from. Register a new skin in `SKINS`. In JavaScript the
-fields are `armsUp` and `sadBody`.
+(row, column) spots tears fall from. Optional: `groom` (the body with a paw at its mouth),
+`tail` (the tail tip's cell down and up, for the swish), `back` (the body from behind --
+without one there is no "oops") and `fed_up` (what it says when poked too often). Register
+a new skin in `SKINS`. In JavaScript the fields are `armsUp`, `sadBody` and `fedUp`.
 
 ## Adding an act
 

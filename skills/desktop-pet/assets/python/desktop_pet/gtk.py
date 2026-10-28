@@ -11,6 +11,7 @@ the pet's body: every other click reaches the app underneath.
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable, Iterable
 
@@ -19,9 +20,11 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
-from .core import GNSS_ACTS, PIXEL, Bounds, Ledge, Pet, act_view, frame, skin_named  # noqa: E402
+from .core import GNSS_ACTS, PIXEL, PROPS, Bounds, Ledge, Pet, act_view, frame, skin_named  # noqa: E402
 
 FRAME_MS = 16
 PERCH_REFRESH_S = 0.5
@@ -39,6 +42,11 @@ _PUFF = "#7D8691"
 _MARK = "#D97757"
 _SLEEP = "#7A8BA8"
 _DOT_OFF = "#C9CED6"
+_DUST = "#D9B07A"
+_FLY = "#2B2B33"
+_STAR = "#F2B632"
+_BUBBLE_EDGE = "#16161C"
+_PROP_PIXEL = 3
 
 
 def _rgb(colour: str) -> tuple[float, float, float]:
@@ -173,8 +181,9 @@ class GtkPet:
         pet = self.pet
         rows = frame(pet)
         palette = pet.skin.palette
-        across = PIXEL * (1.0 + pet.squash)
-        down = PIXEL * (1.0 - pet.squash)
+        squash = pet.squash + pet.breathing
+        across = PIXEL * (1.0 + squash)
+        down = PIXEL * (1.0 - squash)
         left = pet.x - len(rows[0]) * across / 2
         top = pet.y - len(rows) * down
         for r, row in enumerate(rows):
@@ -183,7 +192,34 @@ class GtkPet:
                     context.set_source_rgb(*_rgb(palette[cell]))
                     context.rectangle(left + c * across, top + r * down, across + 0.5, down + 0.5)
                     context.fill()
-        dots = act_view(pet).dots
+        view = act_view(pet)
+        for name, x, y, alpha in view.props:
+            grid, colours = PROPS[name]
+            prop_left = pet.x + x - len(grid[0]) * _PROP_PIXEL / 2
+            prop_top = pet.y + y - len(grid) * _PROP_PIXEL / 2
+            for r, row in enumerate(grid):
+                for c, mark in enumerate(row):
+                    if mark in colours:
+                        context.set_source_rgba(*_rgb(colours[mark]), alpha)
+                        context.rectangle(prop_left + c * _PROP_PIXEL, prop_top + r * _PROP_PIXEL,
+                                          _PROP_PIXEL, _PROP_PIXEL)
+                        context.fill()
+        if view.fly is not None:
+            context.set_source_rgb(*_rgb(_FLY))
+            context.rectangle(pet.x + view.fly[0] - 1.5, pet.y + view.fly[1] - 1.5, 3, 3)
+            context.fill()
+        if view.stars is not None:
+            context.set_source_rgb(*_rgb(_STAR))
+            for i in range(3):
+                phase = view.stars + i * 2.0 * math.pi / 3
+                sx = pet.x + 20 * math.cos(phase)
+                sy = pet.y - pet.skin.height - 6 + 5 * math.sin(phase)
+                context.rectangle(sx - 1, sy - 3, 2, 6)
+                context.rectangle(sx - 3, sy - 1, 6, 2)
+            context.fill()
+        if view.speech:
+            self._draw_speech(context, view.speech)
+        dots = view.dots
         if dots is not None:
             for i in range(3):
                 context.set_source_rgb(*_rgb(_SLEEP if i < dots else _DOT_OFF))
@@ -195,6 +231,10 @@ class GtkPet:
             if particle.kind == "tear":
                 context.set_source_rgba(*_rgb(_TEAR), alpha)
                 context.rectangle(x - 1.5, y, 3, 5)
+                context.fill()
+            elif particle.kind == "dust":
+                context.set_source_rgba(*_rgb(_DUST), alpha)
+                context.rectangle(x - 1.5, y - 1.5, 3, 3)
                 context.fill()
             elif particle.kind == "puff":
                 size = 4 + (0.6 - particle.life) * 10
@@ -218,6 +258,29 @@ class GtkPet:
                 context.show_text(particle.kind)
         return False
 
+    def _draw_speech(self, context, text: str) -> None:
+        """A speech bubble over its head, laid out by Pango so any script reads right."""
+        layout = self.area.create_pango_layout(text)
+        layout.set_width(150 * Pango.SCALE)
+        layout.set_wrap(Pango.WrapMode.WORD)
+        layout.set_alignment(Pango.Alignment.CENTER)
+        font = Pango.FontDescription.from_string("Sans Bold 9")
+        layout.set_font_description(font)
+        _ink, logical = layout.get_pixel_extents()
+        width, height = logical.width + 12, logical.height + 6
+        left, top = self.pet.x - width / 2, self.pet.y - self.pet.skin.height - 18 - height
+        context.set_line_width(1.5)
+        context.rectangle(left, top, width, height)
+        context.move_to(self.pet.x - 5, top + height)
+        context.line_to(self.pet.x, top + height + 8)
+        context.line_to(self.pet.x + 5, top + height)
+        context.set_source_rgb(1.0, 1.0, 1.0)
+        context.fill_preserve()
+        context.set_source_rgb(*_rgb(_BUBBLE_EDGE))
+        context.stroke()
+        context.move_to(left + 6 - logical.x, top + 3)
+        PangoCairo.show_layout(context, layout)
+
     # -- picking it up ---------------------------------------------------------------------
 
     def _local(self, event) -> tuple[float, float]:
@@ -227,9 +290,12 @@ class GtkPet:
     def _press(self, _area, event) -> bool:
         if event.button != 1:
             return False
+        if event.type == Gdk.EventType.BUTTON_PRESS:
+            self.pet.poke()  # a double click is two of these, then the _2BUTTON_PRESS
         if event.type == Gdk.EventType._2BUTTON_PRESS:
             self._samples = []
-            self.pet.cheer()
+            if self.pet.speech is None:
+                self.pet.cheer()
             return True
         x, y = self._local(event)
         self._grip = (self.pet.x - x, self.pet.y - y)

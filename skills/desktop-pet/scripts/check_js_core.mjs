@@ -15,6 +15,7 @@ function state(pet, step) {
     ledge: pet.ledge === null ? null : [pet.ledge.left, pet.ledge.y],
     particles: pet.particles.map((p) => [p.kind, p.x, p.y]),
     view: [view.props.length, view.labels.map((label) => label[0]), view.ghost, view.bars, view.dots],
+    speech: pet.speech, dizzy: pet.dizzy, petting: pet.petting,
   };
   if (step % 10 === 0) out.frame = frame(pet);
   return out;
